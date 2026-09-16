@@ -112,25 +112,24 @@ class OptionsFlowService:
             return None
 
         symbol = str(chain.get("symbol") or "").upper()
-        # Use live lot_size from the leg if available (Fyers populates it),
-        # otherwise fall back to the dynamic LotSizeService.
-        lot_size_raw = leg.get("lot_size") or (chain.get("lot_size"))
+        # Feed live lot_size seen in the chain leg back into LotSizeService for
+        # other callers (futures page, strategy builder, etc.).
+        lot_size_raw = leg.get("lot_size") or chain.get("lot_size")
         try:
-            lot_size = int(float(lot_size_raw)) if lot_size_raw else 0
+            lot_size_live = int(float(lot_size_raw)) if lot_size_raw else 0
         except (TypeError, ValueError):
-            lot_size = 0
-        if lot_size <= 0:
-            lot_size = get_lot_size_service().get(symbol)
-        # Feed any live lot size back into the service for other callers.
-        if lot_size > 0:
-            get_lot_size_service().update(symbol, lot_size)
+            lot_size_live = 0
+        if lot_size_live > 0:
+            get_lot_size_service().update(symbol, lot_size_live)
 
         avg_volume = max(chain_avg_volume * 0.75, abs(oi) * 0.06, 1.0)
         avg_oi_change = max(chain_avg_oi_change * 0.8, abs(oi) * 0.015, 1.0)
         volume_ratio = round(volume / avg_volume, 2)
         oi_change_ratio = round(abs(oi_change) / avg_oi_change, 2)
-        # premium_value = volume (in lots/contracts) × LTP × lot_size (qty per lot)
-        premium_value = round(max(volume, 0) * max(ltp, 0.0) * max(lot_size, 1), 2)
+        # NSE totalTradedVolume is in lots; premium = lots × LTP (rupees per contract).
+        # Do NOT multiply by lot_size here — that would double-count it.
+        # e.g. NIFTY 24300: 21,331,565 lots × ₹225 LTP = ₹479.96 Cr  ✓
+        premium_value = round(max(volume, 0) * max(ltp, 0.0), 2)
 
         if volume_ratio <= 2.0 and oi_change_ratio <= 2.0:
             return None
