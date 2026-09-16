@@ -20,19 +20,21 @@ class StubFlowFetcher:
             "atm_strike": 22500.0,
             "strikes": [
                 {
+                    # vol/OI = 3.0x, OI turnover = 25% → passes filter, heat ~30-40
                     "strike_price": 22400,
-                    "ce": {"oi": 120000, "oi_change": 2500, "volume": 22000, "iv": 18.2, "ltp": 185.0},
-                    "pe": {"oi": 98000, "oi_change": 900, "volume": 2500, "iv": 19.1, "ltp": 72.0},
+                    "ce": {"oi": 120000, "oi_change": 30000, "volume": 360000, "iv": 18.2, "ltp": 185.0},
+                    "pe": {"oi": 98000,  "oi_change": 900,   "volume": 2500,   "iv": 19.1, "ltp": 72.0},
                 },
                 {
+                    # vol/OI = 5.2x, OI turnover = 26% → passes filter, heat ~45-55
                     "strike_price": 22500,
-                    "ce": {"oi": 110000, "oi_change": 1200, "volume": 6000, "iv": 17.8, "ltp": 132.0},
-                    "pe": {"oi": 145000, "oi_change": 4800, "volume": 26000, "iv": 20.6, "ltp": 165.0},
+                    "ce": {"oi": 110000, "oi_change": 1200,  "volume": 6000,   "iv": 17.8, "ltp": 132.0},
+                    "pe": {"oi": 145000, "oi_change": 37700, "volume": 754000, "iv": 20.6, "ltp": 165.0},
                 },
                 {
                     "strike_price": 22600,
-                    "ce": {"oi": 76000, "oi_change": 600, "volume": 1200, "iv": 16.9, "ltp": 90.0},
-                    "pe": {"oi": 160000, "oi_change": 700, "volume": 1800, "iv": 21.0, "ltp": 210.0},
+                    "ce": {"oi": 76000,  "oi_change": 600,   "volume": 1200,   "iv": 16.9, "ltp": 90.0},
+                    "pe": {"oi": 160000, "oi_change": 700,   "volume": 1800,   "iv": 21.0, "ltp": 210.0},
                 },
             ],
             "totals": {"pcr_oi": 1.24, "pcr_volume": 1.11},

@@ -290,10 +290,8 @@ export function OptionsFlowPage() {
                           <div className="w-28" data-testid="heat-score-bar">
                             <div className="mb-1 flex items-center justify-between text-[10px] text-terminal-muted">
                               <span>{flow.heat_score.toFixed(1)}</span>
-                              {/* Show the dominant signal ratio — whichever of vol or OI is higher */}
-                              {(flow.oi_change_ratio ?? 0) > (flow.volume_ratio ?? 0)
-                                ? <span title="OI ratio">{(flow.oi_change_ratio ?? 0).toFixed(1)}x oi</span>
-                                : <span title="Vol ratio">{(flow.volume_ratio ?? 0).toFixed(1)}x vol</span>}
+                              {/* vol/OI ratio — how many times the strike's OI was traded */}
+                              <span title="Vol/OI ratio">{(flow.volume_ratio ?? 0).toFixed(1)}x</span>
                             </div>
                             <div className="h-2 overflow-hidden rounded-full bg-terminal-bg">
                               <div
@@ -344,8 +342,8 @@ export function OptionsFlowPage() {
                                 <div className="mb-2 text-[10px] uppercase tracking-wide text-terminal-muted">Signal Read</div>
                                 <div className="space-y-1 text-sm text-terminal-text">
                                   <div>Avg Vol: {flow.avg_volume.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</div>
-                                  <div>Vol Ratio: {(flow.volume_ratio ?? 0).toFixed(2)}x</div>
-                                  <div>OI Ratio: {(flow.oi_change_ratio ?? 0).toFixed(2)}x</div>
+                                  <div>Vol/OI: {(flow.volume_ratio ?? 0).toFixed(2)}x</div>
+                                  <div>OI Turnover: {(flow.oi_change_ratio ?? 0).toFixed(1)}%</div>
                                   <div>Heat: {flow.heat_score.toFixed(2)}</div>
                                   <div>Premium: {formatPremium(flow.premium_value)}</div>
                                 </div>

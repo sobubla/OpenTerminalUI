@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from statistics import mean
 from typing import Any
 
 from backend.fno.services.option_chain_fetcher import OptionChainFetcher, get_option_chain_fetcher
@@ -57,29 +56,36 @@ class OptionsFlowService:
             return [symbol_u]
         return list(DEFAULT_FLOW_SYMBOLS)
 
-    def compute_heat_score(self, volume_ratio: float, oi_change_ratio: float, premium_value: float) -> float:
+    def compute_heat_score(self, vol_oi_ratio: float, oi_turnover_pct: float, premium_value: float) -> float:
         """
-        Composite score 0-100 based on volume ratio, OI change ratio, and premium size.
+        Composite heat score 0-100 for unusual options activity detection.
 
-        Each component is normalised independently to a 0-100 sub-score then blended
-        as a weighted average so that any single extreme value cannot dominate.
+        Uses THREE self-normalising per-strike metrics that do not depend on
+        chain-wide averages (which are dominated by ATM strikes and produce
+        near-zero ratios for every individual strike):
 
-        Weights: volume_ratio 40%, oi_change_ratio 35%, premium_size 25%.
+        1. vol_oi_ratio   (weight 40%): volume / standing_OI
+                          Measures how aggressively the strike is being traded
+                          relative to its own open interest.
+                          1x = normal turnover, 5x = very active, 10x = extreme
+                          Scale: 1x→0, 3x→22, 5x→44, 10x→100
 
-        Reference scales (tuned for NSE F&O real data):
-          volume_ratio   : 2x = ~11, 5x = ~40, 10x = ~67, 20x = saturates at 100
-          oi_change_ratio: 2x = ~9,  5x = ~36, 10x = ~64, 15x = saturates at 100
-          premium_value  : log10 scale anchored at ₹10L (1e6) low end,
-                           ₹500Cr (5e9) high end → NIFTY ₹100Cr ≈ 52, ₹500Cr ≈ 100
+        2. oi_turnover_pct (weight 35%): |oi_change| / standing_OI × 100
+                          Percentage of standing OI that moved (built or unwound).
+                          10% = modest, 50% = significant, 100%+ = extreme
+                          Scale: 10%→0, 30%→28, 60%→56, 100%→100
+
+        3. premium_value  (weight 25%): absolute ₹ traded (lots × LTP)
+                          Log10 scale: ₹1Cr→27, ₹10Cr→54, ₹100Cr→81, ₹500Cr→100
         """
-        # vol_score: 2x → 5.3, 5x → 21.1, 10x → 47.4, 20x → 100 (ceiling 19x range)
-        vol_score = min(100.0, max(volume_ratio - 1.0, 0.0) / 19.0 * 100.0)
-        # oi_score: 2x → 7.1, 5x → 28.6, 10x → 64.3, 14x → 100 (ceiling 14x range)
-        oi_score  = min(100.0, max(oi_change_ratio - 1.0, 0.0) / 14.0 * 100.0)
-        # Log10 scale: floor=1e6 (₹10L), ceiling=log10(5e9) ≈ 9.7 (₹500Cr)
-        # ₹1Cr  = 1e7 → (7-6)/3.7*100 = 27   ₹10Cr = 1e8 → (8-6)/3.7*100 = 54
-        # ₹100Cr= 1e9 → (9-6)/3.7*100 = 81   ₹500Cr= 5e9 → (9.7-6)/3.7*100 = 100
-        log_low, log_high = 6.0, 9.699
+        # vol_oi_ratio: volume/OI — 1x baseline, 10x saturates at 100
+        vol_score = min(100.0, max(vol_oi_ratio - 1.0, 0.0) / 9.0 * 100.0)
+
+        # oi_turnover_pct: % of OI that changed — 100% saturates at 100
+        oi_score = min(100.0, max(oi_turnover_pct, 0.0))
+
+        # premium_score: log10 from ₹1Cr (1e7) to ₹500Cr (5e9)
+        log_low, log_high = 7.0, 9.699
         prem_log = math.log10(max(premium_value, 1.0))
         prem_score = min(100.0, max(0.0, (prem_log - log_low) / (log_high - log_low) * 100.0))
 
@@ -91,8 +97,6 @@ class OptionsFlowService:
         chain: dict[str, Any],
         row: dict[str, Any],
         option_type: str,
-        chain_avg_volume: float,
-        chain_avg_oi_change: float,
         timestamp: datetime,
         row_index: int,
     ) -> dict[str, Any] | None:
@@ -122,16 +126,22 @@ class OptionsFlowService:
         if lot_size_live > 0:
             get_lot_size_service().update(symbol, lot_size_live)
 
-        avg_volume = max(chain_avg_volume * 0.75, abs(oi) * 0.06, 1.0)
-        avg_oi_change = max(chain_avg_oi_change * 0.8, abs(oi) * 0.015, 1.0)
-        volume_ratio = round(volume / avg_volume, 2)
-        oi_change_ratio = round(abs(oi_change) / avg_oi_change, 2)
+        # Self-normalising per-strike metrics — no chain average needed.
+        # vol_oi_ratio: how many times the strike's OI was traded today
+        #   NIFTY 24300: 21.3M lots traded / 2.7M OI = 7.9x  (very active)
+        vol_oi_ratio = round(volume / max(abs(oi), 1), 2)
+
+        # oi_turnover_pct: what % of standing OI actually changed (new positions or unwinds)
+        #   NIFTY 24300: 2.07M oi_change / 2.69M OI * 100 = 77%  (heavy positioning)
+        oi_turnover_pct = round(abs(oi_change) / max(abs(oi), 1) * 100.0, 2)
+
         # NSE totalTradedVolume is in lots; premium = lots × LTP (rupees per contract).
-        # Do NOT multiply by lot_size here — that would double-count it.
-        # e.g. NIFTY 24300: 21,331,565 lots × ₹225 LTP = ₹479.96 Cr  ✓
+        # Do NOT multiply by lot_size — NSE volume is already in lots, not contracts.
         premium_value = round(max(volume, 0) * max(ltp, 0.0), 2)
 
-        if volume_ratio <= 2.0 and oi_change_ratio <= 2.0:
+        # Filter: skip low-activity strikes with no meaningful signal
+        # vol_oi_ratio > 1.5x (trading > 150% of OI) OR oi_turnover > 15%
+        if vol_oi_ratio <= 1.5 and oi_turnover_pct <= 15.0:
             return None
 
         event_timestamp = timestamp + timedelta(seconds=(row_index * 37) + (0 if option_type == "CE" else 19))
@@ -144,15 +154,15 @@ class OptionsFlowService:
             "strike": round(strike, 2),
             "option_type": option_type,
             "volume": volume,
-            "avg_volume": round(avg_volume, 2),
-            "volume_ratio": volume_ratio,
-            "oi_change_ratio": oi_change_ratio,
+            "avg_volume": round(volume / max(vol_oi_ratio, 0.01), 2),
+            "volume_ratio": vol_oi_ratio,
+            "oi_change_ratio": oi_turnover_pct,
             "oi": oi,
             "oi_change": oi_change,
             "premium_value": premium_value,
             "implied_vol": round(iv, 4),
             "sentiment": sentiment,
-            "heat_score": self.compute_heat_score(volume_ratio, oi_change_ratio, premium_value),
+            "heat_score": self.compute_heat_score(vol_oi_ratio, oi_turnover_pct, premium_value),
             "spot_price": round(self._to_float(chain.get("spot_price")), 4),
             "chain_context": {
                 "atm_strike": self._to_float(chain.get("atm_strike")),
@@ -167,21 +177,11 @@ class OptionsFlowService:
         if not strikes:
             return []
 
-        ce_volumes = [self._to_float(((row.get("ce") or {}) if isinstance(row.get("ce"), dict) else {}).get("volume")) for row in strikes]
-        pe_volumes = [self._to_float(((row.get("pe") or {}) if isinstance(row.get("pe"), dict) else {}).get("volume")) for row in strikes]
-        ce_oi_changes = [abs(self._to_float(((row.get("ce") or {}) if isinstance(row.get("ce"), dict) else {}).get("oi_change"))) for row in strikes]
-        pe_oi_changes = [abs(self._to_float(((row.get("pe") or {}) if isinstance(row.get("pe"), dict) else {}).get("oi_change"))) for row in strikes]
-
-        avg_ce_volume = max(mean([v for v in ce_volumes if v > 0] or [1.0]), 1.0)
-        avg_pe_volume = max(mean([v for v in pe_volumes if v > 0] or [1.0]), 1.0)
-        avg_ce_oi_change = max(mean([v for v in ce_oi_changes if v > 0] or [1.0]), 1.0)
-        avg_pe_oi_change = max(mean([v for v in pe_oi_changes if v > 0] or [1.0]), 1.0)
-
         timestamp = self._as_timestamp(chain.get("timestamp"))
         flows: list[dict[str, Any]] = []
         for idx, row in enumerate(strikes):
-            ce_flow = self._infer_leg_activity(chain, row, "CE", avg_ce_volume, avg_ce_oi_change, timestamp, idx)
-            pe_flow = self._infer_leg_activity(chain, row, "PE", avg_pe_volume, avg_pe_oi_change, timestamp, idx)
+            ce_flow = self._infer_leg_activity(chain, row, "CE", timestamp, idx)
+            pe_flow = self._infer_leg_activity(chain, row, "PE", timestamp, idx)
             if ce_flow:
                 flows.append(ce_flow)
             if pe_flow:
