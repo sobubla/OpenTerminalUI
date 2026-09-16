@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
-import { fetchHeatmapIV, fetchHeatmapOI } from "../api/fnoApi";
+import { fetchHeatmapIV, fetchHeatmapOI, fetchHeatmapVolume, fetchHeatmapPCR } from "../api/fnoApi";
 
 type Mode = "oi" | "iv" | "volume" | "pcr";
 
@@ -35,6 +35,23 @@ const getOiColor = (pe: number, ce: number) => {
   if (ratio >= 0.7) return "#ff8a80";
   return "#ff1744";
 };
+
+const getVolumeColor = (pe: number, ce: number) => {
+  const ratio = (pe + 1) / (ce + 1);
+  if (ratio >= 1.5) return "#00e676";
+  if (ratio >= 1.0) return "#00c176";
+  if (ratio >= 0.7) return "#ff8a80";
+  return "#ff1744";
+};
+
+const fmt = (n: number) =>
+  n >= 1_00_00_000
+    ? `${(n / 1_00_00_000).toFixed(1)}Cr`
+    : n >= 1_00_000
+    ? `${(n / 1_00_000).toFixed(1)}L`
+    : n >= 1000
+    ? `${(n / 1000).toFixed(1)}K`
+    : String(n);
 
 /** Simple CSS-grid treemap approximation — avoids Recharts Treemap internals crash */
 function HeatGrid({ cells, onCellClick }: { cells: HeatCell[]; onCellClick: (name: string) => void }) {
@@ -83,8 +100,34 @@ export function HeatmapPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("oi");
 
-  const oiQuery = useQuery({ queryKey: ["fno-heatmap-oi"], queryFn: fetchHeatmapOI, staleTime: 60_000, refetchInterval: 60_000 });
-  const ivQuery = useQuery({ queryKey: ["fno-heatmap-iv"], queryFn: fetchHeatmapIV, staleTime: 60_000, refetchInterval: 60_000 });
+  // Each mode has its own dedicated query hitting its own endpoint
+  const oiQuery = useQuery({
+    queryKey: ["fno-heatmap-oi"],
+    queryFn: fetchHeatmapOI,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+  const ivQuery = useQuery({
+    queryKey: ["fno-heatmap-iv"],
+    queryFn: fetchHeatmapIV,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    enabled: mode === "iv",
+  });
+  const volumeQuery = useQuery({
+    queryKey: ["fno-heatmap-volume"],
+    queryFn: fetchHeatmapVolume,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    enabled: mode === "volume",
+  });
+  const pcrQuery = useQuery({
+    queryKey: ["fno-heatmap-pcr"],
+    queryFn: fetchHeatmapPCR,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    enabled: mode === "pcr",
+  });
 
   const data = useMemo((): HeatCell[] => {
     if (mode === "iv") {
@@ -96,25 +139,57 @@ export function HeatmapPage() {
         extra: `IV Rank: ${Number(r.iv_rank || 0).toFixed(1)}`,
       }));
     }
+
+    if (mode === "volume") {
+      return (volumeQuery.data ?? []).map((r) => {
+        const ceVol = Number(r.ce_volume_total || 0);
+        const peVol = Number(r.pe_volume_total || 0);
+        const total = Number(r.total_volume || 0);
+        return {
+          name: r.symbol,
+          size: Math.max(total, 0.01),
+          value: total,
+          color: getVolumeColor(peVol, ceVol),
+          extra: `CE Vol: ${fmt(ceVol)} | PE Vol: ${fmt(peVol)} | PCR: ${Number(r.pcr_oi || 0).toFixed(2)}`,
+        };
+      });
+    }
+
+    if (mode === "pcr") {
+      return (pcrQuery.data ?? []).map((r) => {
+        const ceOi = Number(r.ce_oi_total || 0);
+        const peOi = Number(r.pe_oi_total || 0);
+        const pcr = Number(r.pcr_oi || 0);
+        return {
+          name: r.symbol,
+          // Size tiles by total OI so large-cap dominates; PCR drives the colour
+          size: Math.max(ceOi + peOi, 0.01),
+          value: pcr,
+          color: getPcrColor(pcr),
+          extra: `PCR: ${pcr.toFixed(2)} | CE: ${fmt(ceOi)} | PE: ${fmt(peOi)}`,
+        };
+      });
+    }
+
+    // Default: OI mode
     return (oiQuery.data ?? []).map((r) => {
-      const peOpts = Number(r.pe_oi_total || 0);
-      const ceOpts = Number(r.ce_oi_total || 0);
-      const oi = ceOpts + peOpts;
+      const peOi = Number(r.pe_oi_total || 0);
+      const ceOi = Number(r.ce_oi_total || 0);
+      const totalOi = ceOi + peOi;
       const pcr = Number(r.pcr_oi || 0);
-      const proxyVolume = oi;
-      const selectedValue = mode === "pcr" ? pcr : mode === "volume" ? proxyVolume : oi;
       return {
         name: r.symbol,
-        size: Math.max(Math.abs(selectedValue), 0.01),
-        value: selectedValue,
-        color: mode === "pcr" ? getPcrColor(pcr) : getOiColor(peOpts, ceOpts),
-        extra: `PCR: ${pcr.toFixed(2)} | CE: ${ceOpts.toLocaleString()} | PE: ${peOpts.toLocaleString()}`,
+        size: Math.max(totalOi, 0.01),
+        value: totalOi,
+        color: getOiColor(peOi, ceOi),
+        extra: `PCR: ${pcr.toFixed(2)} | CE: ${fmt(ceOi)} | PE: ${fmt(peOi)}`,
       };
     });
-  }, [mode, ivQuery.data, oiQuery.data]);
+  }, [mode, ivQuery.data, oiQuery.data, volumeQuery.data, pcrQuery.data]);
 
-  const isLoading = (mode === "iv" ? ivQuery : oiQuery).isLoading;
-  const isError = (mode === "iv" ? ivQuery : oiQuery).isError;
+  const activeQuery = mode === "iv" ? ivQuery : mode === "volume" ? volumeQuery : mode === "pcr" ? pcrQuery : oiQuery;
+  const isLoading = activeQuery.isLoading;
+  const isError = activeQuery.isError;
 
   return (
     <div className="space-y-3">
@@ -142,13 +217,13 @@ export function HeatmapPage() {
             <div className="flex h-full flex-col items-center justify-center gap-2 text-terminal-neg text-sm">
               <span className="text-2xl">⚠</span>
               <span>Failed to load heatmap data.</span>
-              <span className="text-xs text-terminal-muted">Ensure the F&amp;O data feed is connected (Kite API key required).</span>
+              <span className="text-xs text-terminal-muted">Ensure the F&amp;O data feed is connected.</span>
             </div>
           ) : data.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-terminal-muted text-sm">
               <span className="text-3xl">📊</span>
               <span>No heatmap data available.</span>
-              <span className="text-xs">Connect a live Kite API key to stream F&amp;O open interest data.</span>
+              <span className="text-xs">Connect a live Fyers / Kite API key to stream F&amp;O data.</span>
             </div>
           ) : (
             <HeatGrid cells={data} onCellClick={(name) => navigate(`/fno?symbol=${encodeURIComponent(name)}`)} />

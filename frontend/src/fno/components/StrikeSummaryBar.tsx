@@ -32,11 +32,15 @@ export function StrikeSummaryBar({ symbol, expiry, spotPrice, summary }: Props) 
       </div>
       <div>
         <div className="text-[10px] uppercase text-terminal-muted">IV Rank</div>
-        <div className="text-sm font-semibold text-terminal-accent">{summary?.iv_rank ? `${summary.iv_rank.toFixed(1)}%` : "0.0%"}</div>
+        <div className="text-sm font-semibold text-terminal-accent" title={!summary?.iv_rank ? "Insufficient history (< 5 trading days)" : undefined}>
+          {summary?.iv_rank ? `${summary.iv_rank.toFixed(1)}%` : "–"}
+        </div>
       </div>
       <div>
         <div className="text-[10px] uppercase text-terminal-muted">IV Pctl</div>
-        <div className="text-sm font-semibold text-terminal-accent">{summary?.iv_percentile ? `${summary.iv_percentile.toFixed(1)}%` : "0.0%"}</div>
+        <div className="text-sm font-semibold text-terminal-accent" title={!summary?.iv_percentile ? "Insufficient history (< 5 trading days)" : undefined}>
+          {summary?.iv_percentile ? `${summary.iv_percentile.toFixed(1)}%` : "–"}
+        </div>
       </div>
       <div>
         <div className="text-[10px] uppercase text-terminal-muted">PCR</div>

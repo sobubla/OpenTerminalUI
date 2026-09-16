@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from backend.api.routes import (
     admin, backtest, backtests, chart, crypto, data,
     commodities, depth, export, forex, fundamentals, health, hotlists, indicators,
-    kite, news, emotion, ai_insights, paper, peers, plugins, portfolio, quotes,
+    kite, fyers, news, emotion, ai_insights, paper, peers, plugins, portfolio, quotes,
     screener, scripting, search, shareholding, stocks,
     stream, valuation, options, audit, data_layer, governance, patterns,
     user_layouts, portfolios,
@@ -49,6 +49,7 @@ equity_router.include_router(emotion.router, prefix="/api", tags=["emotion"])
 equity_router.include_router(ai_insights.router, prefix="/api", tags=["ai-insights"])
 equity_router.include_router(health.router, prefix="/api", tags=["health"])
 equity_router.include_router(kite.router, prefix="/api", tags=["kite"])
+equity_router.include_router(fyers.router, prefix="/api", tags=["fyers"])
 equity_router.include_router(admin.router, prefix="/api", tags=["admin"])
 equity_router.include_router(stream.router, prefix="/api", tags=["stream"])
 equity_router.include_router(indicators.router, prefix="/api", tags=["indicators"])

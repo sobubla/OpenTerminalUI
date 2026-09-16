@@ -47,3 +47,57 @@ async def heatmap_iv() -> dict[str, Any]:
         rows.append({"symbol": symbol, "atm_iv": iv.get("atm_iv", 0.0), "iv_rank": iv.get("iv_rank", 0.0)})
     rows.sort(key=lambda x: float(x.get("atm_iv", 0.0) or 0.0), reverse=True)
     return {"items": rows}
+
+
+@router.get("/fno/heatmap/volume")
+async def heatmap_volume() -> dict[str, Any]:
+    """Total CE+PE traded volume per symbol, sorted descending."""
+    tracker = get_pcr_tracker()
+    fetcher = get_option_chain_fetcher()
+    rows: list[dict[str, Any]] = []
+    for symbol in tracker.snapshot_universe()[:20]:
+        try:
+            chain = await fetcher.get_option_chain(symbol, strike_range=20)
+            totals = chain.get("totals") if isinstance(chain.get("totals"), dict) else {}
+        except Exception:
+            totals = {}
+        ce_vol = float(totals.get("ce_volume_total", 0) or 0)
+        pe_vol = float(totals.get("pe_volume_total", 0) or 0)
+        rows.append(
+            {
+                "symbol": symbol,
+                "ce_volume_total": ce_vol,
+                "pe_volume_total": pe_vol,
+                "total_volume": ce_vol + pe_vol,
+                "pcr_oi": float(totals.get("pcr_oi", 0.0) or 0.0),
+            }
+        )
+    rows.sort(key=lambda x: float(x.get("total_volume", 0) or 0), reverse=True)
+    return {"items": rows}
+
+
+@router.get("/fno/heatmap/pcr")
+async def heatmap_pcr() -> dict[str, Any]:
+    """Current PCR (OI-based) per symbol, sized by total OI."""
+    tracker = get_pcr_tracker()
+    fetcher = get_option_chain_fetcher()
+    rows: list[dict[str, Any]] = []
+    for symbol in tracker.snapshot_universe()[:20]:
+        try:
+            chain = await fetcher.get_option_chain(symbol, strike_range=20)
+            totals = chain.get("totals") if isinstance(chain.get("totals"), dict) else {}
+        except Exception:
+            totals = {}
+        ce_oi = float(totals.get("ce_oi_total", 0) or 0)
+        pe_oi = float(totals.get("pe_oi_total", 0) or 0)
+        rows.append(
+            {
+                "symbol": symbol,
+                "ce_oi_total": ce_oi,
+                "pe_oi_total": pe_oi,
+                "pcr_oi": float(totals.get("pcr_oi", 0.0) or 0.0),
+            }
+        )
+    # Sort by PCR value so extreme values (bullish/bearish) appear largest
+    rows.sort(key=lambda x: float(x.get("pcr_oi", 0.0) or 0.0), reverse=True)
+    return {"items": rows}

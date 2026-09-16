@@ -1,3 +1,5 @@
+fyers-apiv3
+py_vollib
 fastapi
 uvicorn
 slowapi
@@ -29,9 +31,7 @@ pytest-cov
 pytest-asyncio
 openpyxl
 reportlab
-empyrical
 pyarrow
-hmmlearn
 optuna
 statsmodels
 xgboost

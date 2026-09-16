@@ -156,6 +156,15 @@ def auth_exempt_path(path: str) -> bool:
     }:
         return True
 
+    # Fyers OAuth flow — must be public: the user has no token yet when they
+    # visit login-url or when Fyers redirects back to the callback.
+    if path in {
+        "/api/fyers/auth/login-url",
+        "/api/fyers/auth/callback",
+        "/api/fyers/auth/session",
+    }:
+        return True
+
     # Public API v1 routes - explicit allowlist of public endpoints only
     _PUBLIC_V1_PATHS = {
         "/api/v1/public/health",

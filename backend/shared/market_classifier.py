@@ -47,6 +47,29 @@ _US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX"}
 _NSE_SYMBOLS: set[str] | None = None
 _NSE_LOCK = asyncio.Lock()
 
+# NSE indices — never in equity CSVs, must always resolve to NSE
+_NSE_INDICES = {
+    "NIFTY", "NIFTY50", "NIFTY 50",
+    "BANKNIFTY", "NIFTY BANK",
+    "FINNIFTY", "NIFTY FIN SERVICE",
+    "MIDCPNIFTY", "NIFTYNXT50",
+    "NIFTY100", "NIFTY200", "NIFTY500",
+    "INDIAVIX",
+}
+
+# NSE F&O stocks that are missing from the equity CSV snapshots (updated periodically
+# by NSE but may lag new listings or symbol changes). Any symbol here is always treated
+# as NSE so it never falls through to the NASDAQ default classifier.
+_NSE_FO_EXTRA = {
+    "TMPV",         # Tata Motors Passenger Vehicles — post-demerger F&O symbol, not in old CSVs
+    "TMCV",         # Tata Motors Commercial Vehicles — CM only, not in old equity CSVs
+    "ZOMATO",       # recent listing, absent from older CSV snapshots
+    "LICINDHOUSING",
+    "MCDOWELL-N",
+    "ETERNAL",      # formerly known as Zomato on some exchanges
+    "SWIGGY",       # recent IPO listing
+}
+
 
 def _country_flag_emoji(country_code: str) -> str:
     code = (country_code or "").strip().upper()
@@ -193,10 +216,19 @@ class MarketClassifier:
     async def classify(self, symbol: str) -> StockClassification:
         input_symbol = symbol.strip().upper()
         now = datetime.now(timezone.utc)
-        async with self._cache_lock:
-            cached = self._cache.get(input_symbol)
-            if cached and cached[0] > now:
-                return cached[1]
+
+        # Symbols pinned to NSE via _NSE_INDICES or _NSE_FO_EXTRA must NEVER be served
+        # from cache — a stale NASDAQ entry would route them to the US options adapter.
+        is_pinned_nse = input_symbol in _NSE_INDICES or input_symbol in _NSE_FO_EXTRA
+        if is_pinned_nse:
+            # Also evict any stale entry so it can't re-enter via a race
+            async with self._cache_lock:
+                self._cache.pop(input_symbol, None)
+        else:
+            async with self._cache_lock:
+                cached = self._cache.get(input_symbol)
+                if cached and cached[0] > now:
+                    return cached[1]
 
         base_symbol = input_symbol
         exchange = ""
@@ -208,6 +240,11 @@ class MarketClassifier:
         elif input_symbol.endswith(".BO"):
             base_symbol = input_symbol[:-3]
             exchange = "BSE"
+
+        # Hardcoded NSE index / known F&O stock check — these are never (or not yet)
+        # in the equity CSV snapshots so must be pinned to NSE explicitly.
+        if not exchange and is_pinned_nse:
+            exchange = "NSE"
 
         if not exchange:
             nse_symbols = await self._load_nse_symbols()
@@ -274,3 +311,9 @@ class MarketClassifier:
 
 
 market_classifier = MarketClassifier()
+
+# Eagerly evict any stale in-memory classification for NSE-pinned symbols.
+# The cache dict starts empty on a fresh process, but this also handles the case
+# where the module is reloaded in a long-running process with stale entries.
+for _s in _NSE_FO_EXTRA | _NSE_INDICES | {"TATAMOTORS"}:
+    market_classifier._cache.pop(_s, None)

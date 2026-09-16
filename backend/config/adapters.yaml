@@ -1,17 +1,23 @@
 default:
-  primary: kite
-  fallback:
-    - yahoo
+  #primary: kite
+  #fallback:
+  #  - yahoo
+  primary: fyers
+  fallback: [kite, yahoo]
 
 exchanges:
-  NSE:
-    primary: kite
-    fallback:
-      - yahoo
-  BSE:
-    primary: kite
-    fallback:
-      - yahoo
+ #NSE:
+  #  primary: kite
+  #  fallback:
+  #    - yahoo
+
+  #BSE:
+  #  primary: kite
+  #  fallback:
+  #    - yahoo
+  NSE: { primary: fyers, fallback: [kite, yahoo] }
+  BSE: { primary: fyers, fallback: [kite, yahoo] }
+  
   NASDAQ:
     primary: yahoo
     fallback: []

@@ -253,6 +253,106 @@ class OptionChainFetcher:
             return 0.0
         return 0.0
 
+    async def _fetch_from_fyers(self, symbol: str, expiry: str | None, strike_range: int) -> dict[str, Any] | None:
+        """Fetch option chain from Fyers adapter and normalise to the standard shape."""
+        try:
+            # Import _master at top of method so it is always in scope
+            from backend.adapters.fyers import _master
+            from backend.adapters.registry import get_adapter_registry
+
+            registry = get_adapter_registry()
+            adapter = registry._instances.get("fyers") or registry._instance("fyers")
+            if not adapter:
+                return None
+
+            # Ensure master CSVs are loaded (cached after first call)
+            await asyncio.to_thread(_master.load)
+
+            # Resolve expiry date
+            if expiry:
+                exp_date = date.fromisoformat(expiry)
+            else:
+                fo_rows = _master.fo_rows(symbol)
+                expiry_epochs = sorted(
+                    {int(float(r[8])) for r in fo_rows if r[8] and r[8] != "0"},
+                )
+                if not expiry_epochs:
+                    return None
+                exp_date = datetime.fromtimestamp(expiry_epochs[0], timezone.utc).date()
+
+            fyers_chain = await adapter.get_option_chain(symbol, exp_date)
+            if not fyers_chain or not fyers_chain.contracts:
+                return None
+
+            spot = float(fyers_chain.spot_price)
+            atm = min(
+                (c.strike for c in fyers_chain.contracts),
+                key=lambda k: abs(k - spot),
+                default=0.0,
+            )
+
+            # Filter to strike_range strikes around ATM
+            all_strikes = sorted({c.strike for c in fyers_chain.contracts})
+            if strike_range > 0 and atm:
+                idx = min(range(len(all_strikes)), key=lambda i: abs(all_strikes[i] - atm))
+                window = set(all_strikes[max(0, idx - strike_range): idx + strike_range + 1])
+            else:
+                window = set(all_strikes)
+
+            # Group contracts by strike
+            grouped: dict[float, dict] = {}
+            for c in fyers_chain.contracts:
+                if c.strike not in window:
+                    continue
+                row = grouped.setdefault(c.strike, {"strike_price": c.strike, "ce": {}, "pe": {}})
+                leg = {
+                    "oi": c.oi, "oi_change": c.oi_change, "volume": c.volume,
+                    "iv": c.iv, "ltp": c.ltp, "bid": c.bid, "ask": c.ask,
+                    "price_change": 0.0,
+                    "greeks": {
+                        "delta": getattr(c, "delta", 0.0), "gamma": getattr(c, "gamma", 0.0),
+                        "theta": getattr(c, "theta", 0.0), "vega": getattr(c, "vega", 0.0),
+                        "rho": getattr(c, "rho", 0.0),
+                    },
+                }
+                if c.option_type == "CE":
+                    row["ce"] = leg
+                else:
+                    row["pe"] = leg
+
+            strikes = [grouped[s] for s in sorted(grouped)]
+            ce_oi = sum(int((r.get("ce") or {}).get("oi") or 0) for r in strikes)
+            pe_oi = sum(int((r.get("pe") or {}).get("oi") or 0) for r in strikes)
+            ce_vol = sum(int((r.get("ce") or {}).get("volume") or 0) for r in strikes)
+            pe_vol = sum(int((r.get("pe") or {}).get("volume") or 0) for r in strikes)
+
+            # All available expiries from Fyers master (already loaded above)
+            available = sorted({
+                datetime.fromtimestamp(int(float(r[8])), timezone.utc).date().isoformat()
+                for r in _master.fo_rows(symbol)
+                if r[8] and r[8] != "0"
+            })
+
+            return {
+                "symbol": symbol,
+                "spot_price": round(spot, 4),
+                "timestamp": fyers_chain.timestamp,
+                "expiry_date": exp_date.isoformat(),
+                "available_expiries": available or [exp_date.isoformat()],
+                "atm_strike": atm,
+                "strikes": strikes,
+                "totals": {
+                    "ce_oi_total": ce_oi, "pe_oi_total": pe_oi,
+                    "ce_volume_total": ce_vol, "pe_volume_total": pe_vol,
+                    "pcr_oi": round(pe_oi / ce_oi, 4) if ce_oi > 0 else 0.0,
+                    "pcr_volume": round(pe_vol / ce_vol, 4) if ce_vol > 0 else 0.0,
+                },
+            }
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Fyers option chain fallback failed for %s: %s", symbol, exc)
+            return None
+
     async def get_option_chain(self, symbol: str, expiry: str | None = None, strike_range: int = 20) -> dict[str, Any]:
         """
         Fetch full option chain for an index or stock (NSE or US).
@@ -291,27 +391,31 @@ class OptionChainFetcher:
                 chain["available_expiries"] = await us_adapter.get_expiry_dates(symbol_u)
             chain["market"] = "US"
         else:
-            # NSE Logic (Existing)
-            raw = await asyncio.to_thread(self._fetch_with_nsepython, symbol_u)
-            if not isinstance(raw, dict):
-                raw = await asyncio.to_thread(self._fetch_with_nse_api, symbol_u)
+            # Try Fyers adapter first (most reliable for NSE option chain)
+            chain = await self._fetch_from_fyers(symbol_u, expiry, strike_range)
 
-            if isinstance(raw, dict):
-                chain = self._from_nse_records(symbol_u, raw, expiry, strike_range)
-            else:
-                spot_fallback = await asyncio.to_thread(self._fallback_spot_from_nsetools, symbol_u)
-                if spot_fallback <= 0:
-                    spot_fallback = await self._fallback_spot_from_kite(symbol_u)
-                chain = {
-                    "symbol": symbol_u,
-                    "spot_price": spot_fallback,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "expiry_date": expiry or "",
-                    "available_expiries": [expiry] if expiry else [],
-                    "atm_strike": 0.0,
-                    "strikes": [],
-                    "totals": {"ce_oi_total": 0, "pe_oi_total": 0, "ce_volume_total": 0, "pe_volume_total": 0, "pcr_oi": 0.0, "pcr_volume": 0.0},
-                }
+            if not chain:
+                # Fall back to NSE scraping (often blocked by NSE)
+                raw = await asyncio.to_thread(self._fetch_with_nsepython, symbol_u)
+                if not isinstance(raw, dict) or not raw:
+                    raw = await asyncio.to_thread(self._fetch_with_nse_api, symbol_u)
+
+                if isinstance(raw, dict) and raw:
+                    chain = self._from_nse_records(symbol_u, raw, expiry, strike_range)
+                else:
+                    spot_fallback = await asyncio.to_thread(self._fallback_spot_from_nsetools, symbol_u)
+                    if spot_fallback <= 0:
+                        spot_fallback = await self._fallback_spot_from_kite(symbol_u)
+                    chain = {
+                        "symbol": symbol_u,
+                        "spot_price": spot_fallback,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "expiry_date": expiry or "",
+                        "available_expiries": [expiry] if expiry else [],
+                        "atm_strike": 0.0,
+                        "strikes": [],
+                        "totals": {"ce_oi_total": 0, "pe_oi_total": 0, "ce_volume_total": 0, "pe_volume_total": 0, "pcr_oi": 0.0, "pcr_volume": 0.0},
+                    }
             chain["market"] = "NSE"
 
         # Add IV Rank and Percentile

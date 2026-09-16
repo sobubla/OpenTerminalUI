@@ -58,6 +58,9 @@ class IVEngine:
         return 0.0
 
     async def _save_snapshot(self, symbol: str, atm_iv: float) -> None:
+        # Never persist a zero IV — it poisons the historical rank/percentile calculations.
+        if not atm_iv or atm_iv <= 0:
+            return
         day = date.today().isoformat()
         with engine.begin() as conn:
             conn.execute(
@@ -78,7 +81,15 @@ class IVEngine:
                 },
             )
 
+    # Minimum number of historical daily snapshots required before rank/percentile
+    # are considered statistically meaningful. Below this threshold both values are
+    # returned as 0.0 so the UI shows "–" rather than a spurious 0 / 100.
+    _MIN_IV_HISTORY = 5
+
     async def _iv_rank_percentile(self, symbol: str, current_iv: float) -> tuple[float, float]:
+        if current_iv <= 0:
+            return 0.0, 0.0
+        today_iso = date.today().isoformat()
         cutoff = (date.today() - timedelta(days=365)).isoformat()
         with engine.begin() as conn:
             rows = conn.execute(
@@ -86,21 +97,25 @@ class IVEngine:
                     """
                     SELECT atm_iv
                     FROM iv_snapshots
-                    WHERE symbol = :symbol AND snapshot_date >= :cutoff
+                    WHERE symbol = :symbol
+                        AND snapshot_date >= :cutoff
+                        AND snapshot_date < :today
+                        AND atm_iv > 0
                     ORDER BY snapshot_date ASC
                     """
                 ),
-                {"symbol": symbol.upper(), "cutoff": cutoff},
+                {"symbol": symbol.upper(), "cutoff": cutoff, "today": today_iso},
             ).fetchall()
-        vals = [self._to_float(row[0], 0.0) for row in rows if row and self._to_float(row[0], 0.0) > 0]
-        if current_iv > 0:
-            vals.append(current_iv)
-        if not vals:
+        # Use only PAST snapshots (snapshot_date < today) so today's just-saved value
+        # is never counted in both hist and current_iv, which would guarantee 100 pct.
+        hist = [self._to_float(row[0], 0.0) for row in rows if row and self._to_float(row[0], 0.0) > 0]
+        if len(hist) < self._MIN_IV_HISTORY:
+            # Not enough history — rank/percentile are not meaningful yet
             return 0.0, 0.0
-        low = min(vals)
-        high = max(vals)
+        low = min(hist)
+        high = max(hist)
         iv_rank = ((current_iv - low) / (high - low) * 100.0) if high > low else 0.0
-        pct = (sum(1 for v in vals if v <= current_iv) / len(vals)) * 100.0
+        pct = (sum(1 for v in hist if v <= current_iv) / len(hist)) * 100.0
         return round(max(0.0, min(100.0, pct)), 2), round(max(0.0, min(100.0, iv_rank)), 2)
 
     async def get_iv_data(self, symbol: str, expiry: str | None = None) -> dict[str, Any]:

@@ -28,7 +28,7 @@ class PCRTracker:
         "ITC",
         "BAJFINANCE",
         "MARUTI",
-        "TATAMOTORS",
+        "TMPV",
         "BHARTIARTL",
         "SUNPHARMA",
         "HCLTECH",

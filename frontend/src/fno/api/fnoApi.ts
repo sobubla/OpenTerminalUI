@@ -133,6 +133,16 @@ export async function fetchHeatmapIV(): Promise<Array<{ symbol: string; atm_iv: 
   return Array.isArray(data?.items) ? data.items : [];
 }
 
+export async function fetchHeatmapVolume(): Promise<Array<{ symbol: string; ce_volume_total: number; pe_volume_total: number; total_volume: number; pcr_oi: number }>> {
+  const { data } = await api.get<{ items: Array<{ symbol: string; ce_volume_total: number; pe_volume_total: number; total_volume: number; pcr_oi: number }> }>("/fno/heatmap/volume");
+  return Array.isArray(data?.items) ? data.items : [];
+}
+
+export async function fetchHeatmapPCR(): Promise<Array<{ symbol: string; ce_oi_total: number; pe_oi_total: number; pcr_oi: number }>> {
+  const { data } = await api.get<{ items: Array<{ symbol: string; ce_oi_total: number; pe_oi_total: number; pcr_oi: number }> }>("/fno/heatmap/pcr");
+  return Array.isArray(data?.items) ? data.items : [];
+}
+
 export async function fetchExpiryDashboard(): Promise<Array<{
   symbol: string;
   expiry_date: string;

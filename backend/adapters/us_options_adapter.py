@@ -51,6 +51,14 @@ class USOptionsAdapter:
         """Fetch option chain for a specific symbol and expiry."""
         symbol = symbol.upper()
 
+        # Guard: if expiry is empty, fetch available expirations first rather than
+        # passing "" to yfinance which raises "Expiration '' cannot be found".
+        if not expiry:
+            available = await self.get_expiry_dates(symbol)
+            if not available:
+                return self._empty_chain(symbol, expiry)
+            expiry = available[0]
+
         # 1. Fetch Spot Price
         spot = 0.0
         try:

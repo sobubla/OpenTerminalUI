@@ -15,6 +15,7 @@ from backend.adapters.mock import MockDataAdapter
 from backend.adapters.yahoo import YahooFinanceAdapter
 from backend.adapters.us_options_adapter import USOptionsAdapter
 from backend.core.failover import FailoverSlot, call_with_failover
+from backend.adapters.fyers import FyersAdapter   # with the other adapter imports
 
 
 @dataclass
@@ -25,7 +26,7 @@ class AdapterChain:
 
 class AdapterRegistry:
     def __init__(self, config_path: Path | None = None, *, failure_threshold: int = 3, cooldown_seconds: int = 30) -> None:
-        self.config_path = config_path or (Path(__file__).resolve().parents[2] / "config" / "adapters.yaml")
+        self.config_path = config_path or (Path(__file__).resolve().parents[1] / "config" / "adapters.yaml")
         self._config = self._load_config()
         self._instances: dict[str, DataAdapter] = {}
         self._slots: dict[str, FailoverSlot] = {}
@@ -35,6 +36,7 @@ class AdapterRegistry:
             "alpaca": lambda: AlpacaAdapter(),
             "alpha_vantage": lambda: AlphaVantageAdapter(),
             "kite": lambda: KiteAdapter(),
+            "fyers": lambda: FyersAdapter(), 
             "yahoo": lambda: YahooFinanceAdapter(),
             "us_options": lambda: USOptionsAdapter(),
             "crypto": lambda: CryptoDataAdapter(),
