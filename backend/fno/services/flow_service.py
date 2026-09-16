@@ -146,6 +146,7 @@ class OptionsFlowService:
             "volume": volume,
             "avg_volume": round(avg_volume, 2),
             "volume_ratio": volume_ratio,
+            "oi_change_ratio": oi_change_ratio,
             "oi": oi,
             "oi_change": oi_change,
             "premium_value": premium_value,

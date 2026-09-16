@@ -179,6 +179,7 @@ export type OptionsFlowItem = {
   volume: number;
   avg_volume: number;
   volume_ratio: number;
+  oi_change_ratio: number;
   oi: number;
   oi_change: number;
   premium_value: number;

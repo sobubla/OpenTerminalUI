@@ -290,7 +290,10 @@ export function OptionsFlowPage() {
                           <div className="w-28" data-testid="heat-score-bar">
                             <div className="mb-1 flex items-center justify-between text-[10px] text-terminal-muted">
                               <span>{flow.heat_score.toFixed(1)}</span>
-                              <span>{flow.volume_ratio.toFixed(1)}x</span>
+                              {/* Show the dominant signal ratio — whichever of vol or OI is higher */}
+                              {flow.volume_ratio >= flow.oi_change_ratio
+                                ? <span title="Vol ratio">{flow.volume_ratio.toFixed(1)}x vol</span>
+                                : <span title="OI ratio">{flow.oi_change_ratio.toFixed(1)}x oi</span>}
                             </div>
                             <div className="h-2 overflow-hidden rounded-full bg-terminal-bg">
                               <div
@@ -342,6 +345,7 @@ export function OptionsFlowPage() {
                                 <div className="space-y-1 text-sm text-terminal-text">
                                   <div>Avg Vol: {flow.avg_volume.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</div>
                                   <div>Vol Ratio: {flow.volume_ratio.toFixed(2)}x</div>
+                                  <div>OI Ratio: {flow.oi_change_ratio.toFixed(2)}x</div>
                                   <div>Heat: {flow.heat_score.toFixed(2)}</div>
                                   <div>Premium: {formatPremium(flow.premium_value)}</div>
                                 </div>
