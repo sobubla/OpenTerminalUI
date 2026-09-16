@@ -215,7 +215,7 @@ export const DEFAULT_FNO_SYMBOLS = [
   "ITC",
   "BAJFINANCE",
   "MARUTI",
-  "TATAMOTORS",
+  "TMPV",
   "BHARTIARTL",
   "SUNPHARMA",
   "HCLTECH",
