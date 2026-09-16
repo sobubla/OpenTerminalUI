@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from statistics import mean
@@ -56,9 +57,27 @@ class OptionsFlowService:
         return list(DEFAULT_FLOW_SYMBOLS)
 
     def compute_heat_score(self, volume_ratio: float, oi_change_ratio: float, premium_value: float) -> float:
-        """Composite score 0-100 based on volume + OI + premium size."""
-        raw = (max(volume_ratio, 0.0) * 20.0) + (max(oi_change_ratio, 0.0) * 15.0) + ((max(premium_value, 0.0) / 1_000_000.0) * 10.0)
-        return round(min(100.0, raw), 2)
+        """
+        Composite score 0-100 based on volume ratio, OI change ratio, and premium size.
+
+        Each component is normalised independently to a 0-100 sub-score then blended
+        as a weighted average so that any single extreme value cannot dominate.
+
+        Weights: volume_ratio 40%, oi_change_ratio 35%, premium_size 25%.
+
+        Reference scales (tuned for NSE F&O):
+          volume_ratio  : 1x = baseline, 10x = saturates component at 100
+          oi_change_ratio: 1x = baseline, 8x = saturates component at 100
+          premium_value : ₹1Cr (1e7) = low, ₹100Cr (1e9) = saturates at 100
+        """
+        vol_score = min(100.0, max(volume_ratio - 1.0, 0.0) / 9.0 * 100.0)        # 2x→11, 5x→44, 10x→100
+        oi_score  = min(100.0, max(oi_change_ratio - 1.0, 0.0) / 7.0 * 100.0)    # 2x→14, 4x→43, 8x→100
+        # Log-scale for premium so ₹1Cr→10, ₹10Cr→50, ₹100Cr→100
+        prem_norm = math.log10(max(premium_value, 1.0)) / math.log10(1e9) * 100.0
+        prem_score = min(100.0, max(prem_norm, 0.0))
+
+        raw = vol_score * 0.40 + oi_score * 0.35 + prem_score * 0.25
+        return round(min(100.0, max(0.0, raw)), 2)
 
     def _infer_leg_activity(
         self,

@@ -113,6 +113,12 @@ export function FnoLayout() {
     try {
       const raw = localStorage.getItem(FNO_SYMBOL_KEY);
       const value = (raw || "NIFTY").trim().toUpperCase();
+      // Migrate demerged symbols: TATAMOTORS was split into TMPV (PV) + TMCV (CV).
+      // TMPV is the listed F&O entity; replace any stale stored value automatically.
+      if (value === "TATAMOTORS") {
+        try { localStorage.setItem(FNO_SYMBOL_KEY, "TMPV"); } catch { /* ignore */ }
+        return "TMPV";
+      }
       return value || "NIFTY";
     } catch {
       return "NIFTY";
