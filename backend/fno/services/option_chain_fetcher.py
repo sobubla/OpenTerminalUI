@@ -433,7 +433,10 @@ class OptionChainFetcher:
             chain["atm_iv"] = 0.0
 
         ttl = 60 if market_open_now() else 120
-        await self._cache.set(cache_key, chain, ttl=ttl)
+        # Only cache non-empty chains — an empty chain (no strikes, no spot)
+        # indicates a transient fetch failure and must not poison the cache.
+        if chain.get("strikes") or chain.get("spot_price"):
+            await self._cache.set(cache_key, chain, ttl=ttl)
         return chain
 
     async def get_expiry_dates(self, symbol: str) -> list[str]:

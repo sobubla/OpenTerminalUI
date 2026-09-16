@@ -272,6 +272,16 @@ class MarketClassifier:
 
         if ex_meta["country_code"] == "IN":
             has_futures = await self._has_indian_fo(base_symbol)
+            # _has_indian_fo queries the future_contracts table which is only populated
+            # when Kite instruments are loaded. Fall back to Fyers master as source of
+            # truth — if Fyers has F&O rows the stock definitely has listed derivatives.
+            if not has_futures:
+                try:
+                    from backend.adapters.fyers import _master
+                    _master.load()
+                    has_futures = len(_master.fo_rows(base_symbol)) > 0
+                except Exception:
+                    pass
             has_options = has_futures
         elif exchange in _US_EXCHANGES:
             has_futures = False
