@@ -16,12 +16,12 @@ export async function fetchMarketNews(market: string, limit = 30): Promise<NewsA
 }
 
 export async function fetchLatestNews(limit = 100): Promise<NewsLatestApiItem[]> {
-  const { data } = await api.get<{ items: NewsLatestApiItem[] }>("/v1/news/latest", { params: { limit } });
+  const { data } = await api.get<{ items: NewsLatestApiItem[] }>("/news/latest", { params: { limit } });
   return Array.isArray(data?.items) ? data.items : [];
 }
 
 export async function searchLatestNews(q: string, limit = 100): Promise<NewsLatestApiItem[]> {
-  const { data } = await api.get<{ items: NewsLatestApiItem[] }>("/v1/news/search", { params: { q, limit } });
+  const { data } = await api.get<{ items: NewsLatestApiItem[] }>("/news/search", { params: { q, limit } });
   return Array.isArray(data?.items) ? data.items : [];
 }
 

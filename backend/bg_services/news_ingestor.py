@@ -189,6 +189,11 @@ class NewsIngestor:
         elif fetcher.fmp.api_key:
             items.extend(await self._fetch_fmp(fetcher))
 
+        # If no ticker-specific news (empty watchlist/portfolio), always fall back to
+        # general NSE/market headlines so the news feed is never empty.
+        if not items:
+            items.extend(await self._fetch_general_market_news(fetcher))
+
         if not items:
             self._last_ingest_status = "ok:0"
             logger.info("event=news_ingest_no_items")
@@ -197,6 +202,41 @@ class NewsIngestor:
         inserted = await asyncio.to_thread(self._store_news, items)
         logger.info("event=news_ingest_store inserted=%s candidates=%s", inserted, len(items))
         return inserted
+
+    async def _fetch_general_market_news(self, fetcher: Any) -> list[NormalizedNews]:
+        """Fetch broad NSE/market headlines when watchlist and portfolio are empty."""
+        queries = [
+            "NSE India stock market",
+            "Nifty 50 market",
+            "India economy business",
+        ]
+        out: list[NormalizedNews] = []
+        for query in queries:
+            try:
+                rows = await fetcher.yahoo.search_news(query, limit=15)
+                for row in rows:
+                    title = str(row.get("title") or "").strip()
+                    url = str(row.get("link") or row.get("url") or "").strip()
+                    if not title or not url:
+                        continue
+                    text = f"{title}. {str(row.get('summary') or '').strip()}".strip()
+                    sentiment = score_article_sentiment(text)
+                    out.append(NormalizedNews(
+                        source=str(row.get("publisher") or "Yahoo Finance").strip() or "Yahoo Finance",
+                        title=title,
+                        url=url,
+                        summary=str(row.get("summary") or "").strip(),
+                        image_url="",
+                        published_at=_to_iso(row.get("providerPublishTime") or row.get("pubDate")),
+                        tickers=[],
+                        sentiment_score=float(sentiment.get("score", 0.0)),
+                        sentiment_label=str(sentiment.get("label", "Neutral")),
+                        sentiment_confidence=float(sentiment.get("confidence", 0.0)),
+                    ))
+            except Exception as e:
+                logger.warning("General market news fetch failed for query '%s': %s", query, e)
+                continue
+        return self._dedupe(out)
 
     async def _fetch_yahoo(self, fetcher: Any) -> list[NormalizedNews]:
         tickers = _db_tickers()
