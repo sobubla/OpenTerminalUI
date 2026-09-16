@@ -65,16 +65,19 @@ class OptionsFlowService:
 
         Weights: volume_ratio 40%, oi_change_ratio 35%, premium_size 25%.
 
-        Reference scales (tuned for NSE F&O):
-          volume_ratio  : 1x = baseline, 10x = saturates component at 100
-          oi_change_ratio: 1x = baseline, 8x = saturates component at 100
-          premium_value : ₹1Cr (1e7) = low, ₹100Cr (1e9) = saturates at 100
+        Reference scales (tuned for NSE F&O — NIFTY weekly premium can exceed ₹5,000Cr):
+          volume_ratio   : 1x = baseline, 10x = saturates at 100
+          oi_change_ratio: 1x = baseline, 8x = saturates at 100
+          premium_value  : log10 scale anchored at ₹1Cr (1e7) low end,
+                           ₹10,000Cr (1e11) high end → NIFTY ₹6,500Cr ≈ 79
         """
-        vol_score = min(100.0, max(volume_ratio - 1.0, 0.0) / 9.0 * 100.0)        # 2x→11, 5x→44, 10x→100
-        oi_score  = min(100.0, max(oi_change_ratio - 1.0, 0.0) / 7.0 * 100.0)    # 2x→14, 4x→43, 8x→100
-        # Log-scale for premium so ₹1Cr→10, ₹10Cr→50, ₹100Cr→100
-        prem_norm = math.log10(max(premium_value, 1.0)) / math.log10(1e9) * 100.0
-        prem_score = min(100.0, max(prem_norm, 0.0))
+        vol_score = min(100.0, max(volume_ratio - 1.0, 0.0) / 9.0 * 100.0)
+        oi_score  = min(100.0, max(oi_change_ratio - 1.0, 0.0) / 7.0 * 100.0)
+        # Log10 scale: floor=1e7 (₹1Cr), ceiling=1e11 (₹10,000Cr)
+        # NIFTY ₹5,000Cr = 5e10 → (log10(5e10)-7)/(11-7)*100 = (10.7-7)/4*100 = 92.5 → fair
+        log_low, log_high = 7.0, 11.0
+        prem_log = math.log10(max(premium_value, 1.0))
+        prem_score = min(100.0, max(0.0, (prem_log - log_low) / (log_high - log_low) * 100.0))
 
         raw = vol_score * 0.40 + oi_score * 0.35 + prem_score * 0.25
         return round(min(100.0, max(0.0, raw)), 2)
