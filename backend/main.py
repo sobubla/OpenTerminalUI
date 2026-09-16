@@ -17,6 +17,7 @@ from backend.auth.middleware import AuthMiddleware
 from backend.auth.csrf import CsrfProtectMiddleware
 from backend.adapters.registry import get_adapter_registry
 from backend.bg_services.instruments_loader import get_instruments_loader
+from backend.shared.lot_size_service import get_lot_size_service
 from backend.bg_services.news_ingestor import get_news_ingestor
 from backend.bg_services.pcr_snapshot import get_pcr_snapshot_service
 from backend.bg_services.scanner_alert_scheduler import get_scanner_alert_scheduler_service
@@ -59,6 +60,10 @@ async def lifespan(app: FastAPI):
 
     from backend.api.deps import get_unified_fetcher
     fetcher = await get_unified_fetcher()
+
+    # Pre-warm lot-size registry from Fyers NSE_FO master (non-blocking; failures
+    # are logged and defaults remain active so nothing hard-fails on startup).
+    asyncio.create_task(get_lot_size_service().refresh(), name="lot-size-refresh")
 
     _prefetch_worker = get_prefetch_worker(fetcher)
     _instruments_loader = get_instruments_loader()

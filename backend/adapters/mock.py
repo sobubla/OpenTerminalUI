@@ -7,6 +7,8 @@ from typing import Any
 
 import mibian
 
+from backend.shared.lot_size_service import get_lot_size_service
+
 from backend.adapters.base import (
     DataAdapter,
     FuturesContract,
@@ -147,7 +149,7 @@ class MockDataAdapter(DataAdapter):
                             oi=oi,
                             oi_change=int(self._rng.uniform(-500_000, 500_000)),
                             volume=vol,
-                            lot_size=25 if "NIFTY" in underlying.upper() else 15,
+                            lot_size=get_lot_size_service().get(underlying),
                         )
                     )
                 except Exception:
@@ -211,7 +213,7 @@ class MockDataAdapter(DataAdapter):
                     annualized_basis=round(basis / spot / dte * 365 * 100, 2),
                     oi=int(self._rng.uniform(1_000_000, 15_000_000)),
                     volume=int(self._rng.uniform(500_000, 8_000_000)),
-                    lot_size=25 if "NIFTY" in underlying.upper() else 15,
+                    lot_size=get_lot_size_service().get(underlying),
                 )
             )
 

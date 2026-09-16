@@ -22,8 +22,9 @@ type ChartWindow = "1d" | "5d";
 
 function formatPremium(value: number): string {
   if (!Number.isFinite(value)) return "-";
-  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  return `${formatIndianCompact(value)}`;
+  if (Math.abs(value) >= 1_00_00_000) return `₹${(value / 1_00_00_000).toFixed(2)}Cr`;
+  if (Math.abs(value) >= 1_00_000) return `₹${(value / 1_00_000).toFixed(2)}L`;
+  return `₹${formatIndianCompact(value)}`;
 }
 
 function formatTs(value: string): string {

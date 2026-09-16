@@ -7,6 +7,7 @@ from statistics import mean
 from typing import Any
 
 from backend.fno.services.option_chain_fetcher import OptionChainFetcher, get_option_chain_fetcher
+from backend.shared.lot_size_service import get_lot_size_service
 
 DEFAULT_FLOW_SYMBOLS = (
     "NIFTY",
@@ -65,17 +66,20 @@ class OptionsFlowService:
 
         Weights: volume_ratio 40%, oi_change_ratio 35%, premium_size 25%.
 
-        Reference scales (tuned for NSE F&O — NIFTY weekly premium can exceed ₹5,000Cr):
-          volume_ratio   : 1x = baseline, 10x = saturates at 100
-          oi_change_ratio: 1x = baseline, 8x = saturates at 100
-          premium_value  : log10 scale anchored at ₹1Cr (1e7) low end,
-                           ₹10,000Cr (1e11) high end → NIFTY ₹6,500Cr ≈ 79
+        Reference scales (tuned for NSE F&O real data):
+          volume_ratio   : 2x = ~11, 5x = ~40, 10x = ~67, 20x = saturates at 100
+          oi_change_ratio: 2x = ~9,  5x = ~36, 10x = ~64, 15x = saturates at 100
+          premium_value  : log10 scale anchored at ₹10L (1e6) low end,
+                           ₹500Cr (5e9) high end → NIFTY ₹100Cr ≈ 52, ₹500Cr ≈ 100
         """
-        vol_score = min(100.0, max(volume_ratio - 1.0, 0.0) / 9.0 * 100.0)
-        oi_score  = min(100.0, max(oi_change_ratio - 1.0, 0.0) / 7.0 * 100.0)
-        # Log10 scale: floor=1e7 (₹1Cr), ceiling=1e11 (₹10,000Cr)
-        # NIFTY ₹5,000Cr = 5e10 → (log10(5e10)-7)/(11-7)*100 = (10.7-7)/4*100 = 92.5 → fair
-        log_low, log_high = 7.0, 11.0
+        # vol_score: 2x → 5.3, 5x → 21.1, 10x → 47.4, 20x → 100 (ceiling 19x range)
+        vol_score = min(100.0, max(volume_ratio - 1.0, 0.0) / 19.0 * 100.0)
+        # oi_score: 2x → 7.1, 5x → 28.6, 10x → 64.3, 14x → 100 (ceiling 14x range)
+        oi_score  = min(100.0, max(oi_change_ratio - 1.0, 0.0) / 14.0 * 100.0)
+        # Log10 scale: floor=1e6 (₹10L), ceiling=log10(5e9) ≈ 9.7 (₹500Cr)
+        # ₹1Cr  = 1e7 → (7-6)/3.7*100 = 27   ₹10Cr = 1e8 → (8-6)/3.7*100 = 54
+        # ₹100Cr= 1e9 → (9-6)/3.7*100 = 81   ₹500Cr= 5e9 → (9.7-6)/3.7*100 = 100
+        log_low, log_high = 6.0, 9.699
         prem_log = math.log10(max(premium_value, 1.0))
         prem_score = min(100.0, max(0.0, (prem_log - log_low) / (log_high - log_low) * 100.0))
 
@@ -107,11 +111,26 @@ class OptionsFlowService:
         if volume <= 0 or strike <= 0:
             return None
 
+        symbol = str(chain.get("symbol") or "").upper()
+        # Use live lot_size from the leg if available (Fyers populates it),
+        # otherwise fall back to the dynamic LotSizeService.
+        lot_size_raw = leg.get("lot_size") or (chain.get("lot_size"))
+        try:
+            lot_size = int(float(lot_size_raw)) if lot_size_raw else 0
+        except (TypeError, ValueError):
+            lot_size = 0
+        if lot_size <= 0:
+            lot_size = get_lot_size_service().get(symbol)
+        # Feed any live lot size back into the service for other callers.
+        if lot_size > 0:
+            get_lot_size_service().update(symbol, lot_size)
+
         avg_volume = max(chain_avg_volume * 0.75, abs(oi) * 0.06, 1.0)
         avg_oi_change = max(chain_avg_oi_change * 0.8, abs(oi) * 0.015, 1.0)
         volume_ratio = round(volume / avg_volume, 2)
         oi_change_ratio = round(abs(oi_change) / avg_oi_change, 2)
-        premium_value = round(max(volume, 0) * max(ltp, 0.0) * 100.0, 2)
+        # premium_value = volume (in lots/contracts) × LTP × lot_size (qty per lot)
+        premium_value = round(max(volume, 0) * max(ltp, 0.0) * max(lot_size, 1), 2)
 
         if volume_ratio <= 2.0 and oi_change_ratio <= 2.0:
             return None

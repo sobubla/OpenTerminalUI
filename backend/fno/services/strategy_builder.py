@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from backend.fno.services.option_chain_fetcher import get_option_chain_fetcher
+from backend.shared.lot_size_service import get_lot_size_service
 
 
 class StrategyBuilder:
@@ -231,7 +232,14 @@ class StrategyBuilder:
             opt_type = str(leg_tpl.get("type") or "CE").upper()
             leg_data = (row.get("ce") if opt_type == "CE" else row.get("pe")) if isinstance(row, dict) else {}
             premium = self._to_float((leg_data or {}).get("ltp"), 0.0)
-            lot_size = 50
+            # Prefer lot_size embedded in the chain leg, otherwise look up dynamically.
+            lot_size_raw = (leg_data or {}).get("lot_size")
+            try:
+                lot_size = int(float(lot_size_raw)) if lot_size_raw else 0
+            except (TypeError, ValueError):
+                lot_size = 0
+            if lot_size <= 0:
+                lot_size = get_lot_size_service().get(symbol)
             legs.append(
                 {
                     "type": opt_type,

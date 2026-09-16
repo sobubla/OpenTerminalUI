@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.api.deps import get_unified_fetcher
 from backend.config.settings import get_settings
+from backend.shared.lot_size_service import get_lot_size_service
 from backend.db.base import sqlite_file_from_url
 from backend.shared.sqlite_utils import configure_sqlite_connection
 
@@ -139,10 +140,23 @@ class InstrumentsLoader:
         try:
             await asyncio.to_thread(self._upsert_rows, rows)
             logger.info("Futures instruments refresh completed with %s rows", len(rows))
-            return True
         except Exception as exc:
             logger.warning("Futures instruments refresh failed during upsert: %s", exc)
             return False
+
+        # Feed lot sizes from the freshly fetched Kite instrument rows into the
+        # LotSizeService so the entire application benefits from live NSE data.
+        lot_svc = get_lot_size_service()
+        for row in rows:
+            if row.lot_size > 0:
+                lot_svc.update(row.underlying, row.lot_size,
+                               priority=lot_svc._PRI_KITE, ttl=86_400)
+        logger.info("LotSizeService updated from Kite instruments (%d underlyings)", len(rows))
+
+        # Also re-read Fyers NSE_FO master (runs in background, errors are logged).
+        asyncio.create_task(lot_svc.refresh(), name="lot-size-refresh-instruments")
+
+        return True
 
     async def _loop(self) -> None:
         while not self._stop_event.is_set():
